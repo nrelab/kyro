@@ -40,6 +40,8 @@ fn make_test_tokenizer() -> (LuminaTokenizer, tempfile::TempPath) {
     (tok, path.into_temp_path())
 }
 
+/// Spins up a scheduler, worker (sharing a readiness flag), and app state
+/// backed by a dummy model, for use by the HTTP-level integration tests.
 fn setup_engine() -> (Arc<AppState>, tempfile::TempPath) {
     let (tokenizer, tmp) = make_test_tokenizer();
     let block_manager = BlockManager::new(16, 1024, 256);

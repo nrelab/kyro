@@ -20,6 +20,8 @@ pub struct EngineMetrics {
 }
 
 impl EngineMetrics {
+    /// Registers all engine metrics (requests, tokens, latency, cache,
+    /// and worker circuit-breaker gauges/counters) with `registry`.
     pub fn new(registry: &Registry) -> Result<Arc<Self>> {
         let total_requests = prometheus::register_counter_with_registry!(
             "kyro_requests_total",
@@ -115,6 +117,8 @@ impl EngineMetrics {
 mod tests {
     use super::*;
 
+    /// All metrics, including the worker error/circuit-breaker gauges, are
+    /// registered and can be updated and gathered from the registry.
     #[test]
     fn metrics_register_and_update() {
         let registry = Registry::new();

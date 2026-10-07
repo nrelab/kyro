@@ -19,6 +19,8 @@ pub struct CircuitBreaker {
 }
 
 impl CircuitBreaker {
+    /// Creates a breaker that trips after `max_consecutive_errors` failures
+    /// in a row (floored at 1).
     pub fn new(max_consecutive_errors: u32) -> Self {
         Self {
             max_consecutive_errors: max_consecutive_errors.max(1),
@@ -27,6 +29,7 @@ impl CircuitBreaker {
         }
     }
 
+    /// Resets the consecutive error count after a successful iteration.
     pub fn record_success(&mut self) {
         self.consecutive_errors = 0;
     }
@@ -40,10 +43,12 @@ impl CircuitBreaker {
         self.tripped
     }
 
+    /// Returns whether the breaker has tripped.
     pub fn is_tripped(&self) -> bool {
         self.tripped
     }
 
+    /// Returns the current count of consecutive failures.
     pub fn consecutive_errors(&self) -> u32 {
         self.consecutive_errors
     }
@@ -88,6 +93,8 @@ impl Worker {
         self
     }
 
+    /// Runs the worker loop, ticking the scheduler/model until the circuit
+    /// breaker trips and the loop returns an error.
     pub async fn run_loop(&mut self, notify: Arc<Notify>) -> anyhow::Result<()> {
         loop {
             match self.tick(&notify).await {
@@ -137,6 +144,8 @@ impl Worker {
         }
     }
 
+    /// Runs a single scheduling/inference iteration, returning whether work
+    /// was processed or the scheduler was idle.
     async fn tick(&mut self, notify: &Arc<Notify>) -> anyhow::Result<TickOutcome> {
         // Phase 1: Schedule (short lock hold)
         let (to_prefill, _, mut work_batch) = {
@@ -407,6 +416,7 @@ enum TickOutcome {
 mod breaker_tests {
     use super::*;
 
+    /// Breaker trips once the consecutive error count reaches the threshold.
     #[test]
     fn trips_after_threshold() {
         let mut cb = CircuitBreaker::new(3);
@@ -417,6 +427,7 @@ mod breaker_tests {
         assert_eq!(cb.consecutive_errors(), 3);
     }
 
+    /// A success resets the consecutive error count back to zero.
     #[test]
     fn success_resets_counter() {
         let mut cb = CircuitBreaker::new(3);
@@ -430,6 +441,7 @@ mod breaker_tests {
         assert!(cb.is_tripped());
     }
 
+    /// A threshold of 0 is floored to 1, so a single error trips the breaker.
     #[test]
     fn threshold_floor_of_one() {
         let mut cb = CircuitBreaker::new(0);
@@ -437,6 +449,7 @@ mod breaker_tests {
         assert!(cb.is_tripped());
     }
 
+    /// Once tripped, the breaker remains tripped on further errors.
     #[test]
     fn stays_tripped() {
         let mut cb = CircuitBreaker::new(2);

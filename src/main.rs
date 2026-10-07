@@ -9,6 +9,8 @@ use tokio::sync::{Mutex, Notify};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
+/// Boots the Kyro engine: initializes logging, loads the model, starts the
+/// worker loop (wired to the shared readiness flag), and serves the API.
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
