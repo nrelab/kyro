@@ -23,9 +23,18 @@ Request:
 - `max_tokens` must be within `1..=KYRO_MAX_TOKENS_CAP`; `temperature` in
   `[0,2]`; `top_p` in `(0,1]`; message count ≤ `KYRO_MAX_MESSAGES`; prompt
   size ≤ `KYRO_MAX_PROMPT_BYTES`.
+- Optional `priority` (0–100, default 0): higher-priority requests are
+  dequeued by the scheduler before lower-priority ones; FIFO within equal
+  priority.
+- Optional `tools`: OpenAI-style tool/function definitions
+  (`[{"type": "function", "function": {"name", "description", "parameters"}}]`,
+  max 64). Tool schemas are folded into the prompt so the model can
+  emit tool calls; responses are not auto-executed.
 - Non-streaming requests are bounded by `KYRO_REQUEST_TIMEOUT_SECS`
   (default 600); exceeding it returns `504` with an
-  `{"error": {"message", "type"}}` body.
+  `{"error": {"message", "type"}}` body. Streaming requests are
+  bounded by the same deadline: the SSE stream terminates once
+  it is reached.
 - Requests received before model loading completes return `503`
   ("Engine is not ready").
 - `stream: true` returns `text/event-stream` chunks
@@ -74,4 +83,18 @@ Request:
 
 Prometheus text exposition: request counters by model label, queue depth,
 prefix-cache hits/misses, token counters, TTFT/TBT histograms, KV-cache
-usage.
+usage, worker error counters, circuit-breaker state.
+
+## Distributed Tracing (optional)
+
+Build with the `otlp` feature and set `KYRO_OTLP_ENDPOINT` (or
+`--otlp-endpoint`) to export `tracing` spans to an OpenTelemetry
+collector (e.g. Jaeger, Tempo) over gRPC:
+
+```bash
+cargo run --release --features otlp -- \
+  --otlp-endpoint http://localhost:4317
+```
+
+The `chat_completions` span carries `model` and `stream` attributes;
+the provider flushes on graceful shutdown.

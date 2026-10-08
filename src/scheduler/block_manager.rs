@@ -155,6 +155,16 @@ impl BlockManager {
             }
         }
     }
+
+    /// GPU block utilization in percent (0..=100). Blocks held by
+    /// requests or by the Radix Cache both count as used.
+    pub fn kv_cache_usage_percent(&self) -> f64 {
+        if self.num_gpu_blocks == 0 {
+            return 0.0;
+        }
+        let used = self.num_gpu_blocks - self.free_gpu_blocks.len();
+        (used as f64 / self.num_gpu_blocks as f64) * 100.0
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +236,34 @@ mod tests {
         let mut bm = BlockManager::new(4, 4, 0);
         bm.free(999);
         assert_eq!(bm.free_gpu_blocks.len(), 4);
+    }
+
+    #[test]
+    fn kv_usage_zero_when_empty() {
+        let bm = BlockManager::new(16, 100, 0);
+        assert_eq!(bm.kv_cache_usage_percent(), 0.0);
+    }
+
+    #[test]
+    fn kv_usage_counts_allocated_blocks() {
+        let mut bm = BlockManager::new(16, 100, 0);
+        bm.allocate(1, 16 * 25).unwrap(); // 25 blocks
+        let usage = bm.kv_cache_usage_percent();
+        assert!((usage - 25.0).abs() < 1e-6, "got {}", usage);
+        // Legacy allocate leaves no token trace, so free returns
+        // blocks to the free pool.
+        bm.free(1);
+        assert_eq!(bm.kv_cache_usage_percent(), 0.0);
+    }
+
+    #[test]
+    fn kv_usage_counts_cached_blocks() {
+        let mut bm = BlockManager::new(4, 100, 0);
+        let prompt = vec![1u32; 8];
+        bm.allocate_with_prefix(1, &prompt).unwrap();
+        bm.free(1);
+        // Blocks are deposited into the radix cache and still count as used.
+        let usage = bm.kv_cache_usage_percent();
+        assert!(usage > 0.0, "expected cached blocks to count as used");
     }
 }

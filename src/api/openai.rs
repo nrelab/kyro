@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -17,6 +17,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Notify};
+use tracing::Instrument;
 
 pub struct AppState {
     pub scheduler: Arc<Mutex<Scheduler>>,
@@ -98,6 +99,8 @@ pub struct ChatCompletionRequest {
     pub prompt: Option<String>,
     pub max_tokens: Option<usize>,
     pub response_format: Option<ResponseFormat>,
+    pub priority: Option<u32>,
+    pub tools: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,10 +194,49 @@ pub fn messages_to_prompt(messages: &[Message]) -> String {
     out
 }
 
+/// Render tool definitions as a prompt suffix describing each
+/// function's name, description, and JSON schema.
+pub fn render_tools(tools: &[serde_json::Value]) -> String {
+    tools
+        .iter()
+        .filter_map(|tool| {
+            let func = tool.get("function")?;
+            let name = func.get("name")?.as_str()?;
+            let description = func
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            let parameters = func
+                .get("parameters")
+                .map(|p| p.to_string())
+                .unwrap_or_default();
+            Some(format!(
+                "- {}: {}\n  Schema: {}",
+                name, description, parameters
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ChatCompletionRequest>,
 ) -> impl IntoResponse {
+    let span = tracing::info_span!(
+        "chat_completions",
+        model = %payload.model,
+        stream = payload.stream.unwrap_or(false),
+    );
+    chat_completions_inner(State(state), Json(payload))
+        .instrument(span)
+        .await
+}
+
+async fn chat_completions_inner(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ChatCompletionRequest>,
+) -> Response {
     if !state.ready.load(std::sync::atomic::Ordering::SeqCst) {
         return ApiError::unavailable("Engine is not ready").into_response();
     }
@@ -237,6 +279,16 @@ pub async fn chat_completions(
             return ApiError::bad_request("top_p must be in (0, 1]").into_response();
         }
     }
+    if let Some(pr) = payload.priority {
+        if pr > 100 {
+            return ApiError::bad_request("priority must be in 0..=100").into_response();
+        }
+    }
+    if let Some(tools) = &payload.tools {
+        if tools.len() > 64 {
+            return ApiError::bad_request("Too many tools (max 64)").into_response();
+        }
+    }
     if let Some(metrics) = &state.metrics {
         metrics
             .requests_by_model
@@ -257,6 +309,20 @@ pub async fn chat_completions(
         return ApiError::bad_request(format!("Prompt exceeds {} bytes", state.max_prompt_bytes))
             .into_response();
     }
+
+    // Fold tool/function definitions into the prompt so the model can
+    // emit tool calls. OpenAI-style tools: [{"type": "function",
+    // "function": {"name", "description", "parameters"}}].
+    let prompt_text = match &payload.tools {
+        Some(tools) if !tools.is_empty() => {
+            format!(
+                "{}\n\nAvailable tools:\n{}",
+                prompt_text,
+                render_tools(tools)
+            )
+        }
+        _ => prompt_text,
+    };
 
     let prompt_tokens = match &state.tokenizer {
         Some(tok) => match tok.encode(&prompt_text) {
@@ -292,6 +358,7 @@ pub async fn chat_completions(
         prefill_cursor: 0,
         temperature: payload.temperature.unwrap_or(1.0),
         top_p: payload.top_p.unwrap_or(1.0),
+        priority: payload.priority.unwrap_or(0),
         token_sender: Some(tx),
         grammar_processor: match &payload.response_format {
             Some(rf) if rf.format_type == "json_object" => {
@@ -320,10 +387,24 @@ pub async fn chat_completions(
 
     if payload.stream.unwrap_or(false) {
         let tokenizer = state.tokenizer.clone();
+        let timeout = state.request_timeout;
         let stream = async_stream::stream! {
             let mut ids: Vec<u32> = Vec::new();
             let mut prev_text = String::new();
-            while let Some(token) = rx.recv().await {
+            let deadline = tokio::time::Instant::now() + timeout;
+            loop {
+                let token = match tokio::time::timeout_at(deadline, rx.recv()).await {
+                    Ok(Some(token)) => token,
+                    Ok(None) => break,
+                    Err(_) => {
+                        tracing::warn!(
+                            request_id = request_id,
+                            "stream timed out after {:?}",
+                            timeout
+                        );
+                        break;
+                    }
+                };
                 ids.push(token);
                 let delta = match &tokenizer {
                     Some(tok) => {
@@ -457,6 +538,7 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
                 metrics
                     .queue_depth
                     .set((sched.waiting_queue.len() + sched.running_queue.len()) as f64);
+                metrics.kv_cache_usage.set(sched.kv_cache_usage_percent());
                 drop(sched);
             }
             use prometheus::Encoder;
@@ -509,4 +591,59 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/models", get(list_models))
         .route("/metrics", get(metrics_handler))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_tools_includes_name_description_and_schema() {
+        let tools = serde_json::from_str::<Vec<serde_json::Value>>(
+            r#"[{"type": "function", "function": {
+                "name": "get_weather",
+                "description": "Get current weather",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}
+            }}]"#,
+        )
+        .unwrap();
+        let rendered = render_tools(&tools);
+        assert!(rendered.contains("get_weather"));
+        assert!(rendered.contains("Get current weather"));
+        assert!(rendered.contains("Schema:"));
+        assert!(rendered.contains("properties"));
+    }
+
+    #[test]
+    fn render_tools_skips_malformed_entries() {
+        let tools = serde_json::from_str::<Vec<serde_json::Value>>(
+            r#"[{"type": "function"}, {"not": "a tool"}, {"function": {"name": "ok"}}]"#,
+        )
+        .unwrap();
+        let rendered = render_tools(&tools);
+        assert!(rendered.contains("ok"));
+        assert!(!rendered.contains("not"));
+    }
+
+    #[test]
+    fn render_tools_empty_list_is_empty() {
+        assert_eq!(render_tools(&[]), "");
+    }
+
+    #[test]
+    fn messages_to_prompt_renders_roles() {
+        let messages = vec![
+            Message {
+                role: "user".into(),
+                content: MessageContent::Text("hi".into()),
+            },
+            Message {
+                role: "assistant".into(),
+                content: MessageContent::Text("hello".into()),
+            },
+        ];
+        let prompt = messages_to_prompt(&messages);
+        assert!(prompt.contains("user: hi"));
+        assert!(prompt.contains("assistant: hello"));
+    }
 }

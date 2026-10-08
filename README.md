@@ -16,7 +16,7 @@ Kyro is a high-throughput LLM serving engine written in Rust, inspired by vLLM a
 - **Quantization Support**: GGUF weight loading via candle; FP8 and AWQ are on the roadmap (src/model/quantization is currently a simulation stub).
 - **Constrained Decoding**: Structured JSON-mode and Regex-constrained output via grammar-based sampling.
 - **Multi-LoRA Support**: Planned. LoRA math exists (`src/model/lora.rs`) but weight loading, API parameters, and scheduler integration are not yet implemented.
-- **Observability**: Real-time Prometheus metrics for TTFT, TBT (Time Between Tokens), and KV cache utilization.
+- **Observability**: Real-time Prometheus metrics for TTFT, TBT (Time Between Tokens), and KV cache utilization; optional OpenTelemetry (OTLP) trace export behind the `otlp` cargo feature.
 
 ## Architecture
 
@@ -50,6 +50,7 @@ Startup is configured via CLI flags or environment variables:
 | — | `KYRO_MAX_PROMPT_BYTES` | Max prompt size in bytes (default: 65536) |
 | — | `KYRO_MAX_MESSAGES` | Max messages per chat request (default: 256) |
 | — | `KYRO_REQUEST_TIMEOUT_SECS` | Per-request timeout for non-streaming completions (default: 600) |
+| — | `KYRO_OTLP_ENDPOINT` | OpenTelemetry collector endpoint, e.g. `http://localhost:4317` (requires `otlp` cargo feature) |
 
 Example with a real model:
 

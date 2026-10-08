@@ -47,7 +47,24 @@ Service on port 3000.
 | `KYRO_MAX_TOKENS_CAP` | 4096 | Per-request cap |
 | `KYRO_MAX_PROMPT_BYTES` | 65536 | Per-request prompt cap |
 | `KYRO_MAX_MESSAGES` | 256 | Per-request message cap |
+| `KYRO_REQUEST_TIMEOUT_SECS` | 600 | Per-request timeout (streaming and non-streaming) |
+| `KYRO_OTLP_ENDPOINT` | — | OpenTelemetry collector (requires `otlp` cargo feature) |
 | `RUST_LOG` | `info` | Tracing filter |
+
+## Production checklist
+
+Before exposing Kyro to traffic:
+
+- [ ] **Model and tokenizer verified**: engine starts with `KYRO_MODEL_PATH`; `/ready` returns 200 after startup.
+- [ ] **Resource limits set**: `KYRO_MAX_TOKENS_CAP`, `KYRO_MAX_PROMPT_BYTES`, `KYRO_MAX_MESSAGES` sized for the deployment.
+- [ ] **Timeout configured**: `KYRO_REQUEST_TIMEOUT_SECS` matches the client's patience (default 600s).
+- [ ] **Kubernetes probes**: readiness → `GET /ready`; liveness → `GET /health`.
+- [ ] **Metrics scraped**: Prometheus target on `:3000/metrics`; Grafana dashboard imported from `deploy/grafana-dashboard.json`.
+- [ ] **Alerting installed**: rules from `docs/slos.md` loaded into Prometheus (error rate, TTFT/TBT, queue depth, KV cache, circuit breaker).
+- [ ] **Graceful shutdown**: SIGTERM/SIGINT handled; rolling deploys drain in-flight requests.
+- [ ] **Reverse proxy in front**: TLS termination and authentication (Kyro itself is unauthenticated).
+- [ ] **KV cache sized**: monitor `kyro_kv_cache_usage_percent`; alert above 90%.
+- [ ] **OTLP tracing** (optional): build with `--features otlp` and set `KYRO_OTLP_ENDPOINT` for distributed tracing.
 
 ## Security notes
 

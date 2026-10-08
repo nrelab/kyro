@@ -18,6 +18,7 @@ fn scheduler_bench(c: &mut Criterion) {
                     prefill_cursor: 0,
                     temperature: 1.0,
                     top_p: 1.0,
+                    priority: 0,
                     token_sender: None,
                     grammar_processor: None,
                 });

@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub max_messages: usize,
     /// Per-request timeout for non-streaming completions.
     pub request_timeout_secs: u64,
+    /// OpenTelemetry collector endpoint (e.g. http://localhost:4317).
+    pub otlp_endpoint: Option<String>,
 }
 
 impl AppConfig {
@@ -36,6 +38,8 @@ impl AppConfig {
                 .map_err(|_| anyhow::anyhow!("invalid port value: {:?}", p))?,
             None => 3000,
         };
+        let otlp_endpoint =
+            arg_value("--otlp-endpoint").or_else(|| std::env::var("KYRO_OTLP_ENDPOINT").ok());
 
         let cfg = Self {
             model_path,
@@ -47,6 +51,7 @@ impl AppConfig {
             max_prompt_bytes: parse_env_usize("KYRO_MAX_PROMPT_BYTES", 64 * 1024)?,
             max_messages: parse_env_usize("KYRO_MAX_MESSAGES", 256)?,
             request_timeout_secs: parse_env_u64("KYRO_REQUEST_TIMEOUT_SECS", 600)?,
+            otlp_endpoint,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -126,6 +131,7 @@ mod tests {
             max_prompt_bytes: 1024,
             max_messages: 8,
             request_timeout_secs: 600,
+            otlp_endpoint: None,
         };
         assert!(cfg.validate().is_err());
         cfg.model_name = "kyro".into();
@@ -144,6 +150,7 @@ mod tests {
             max_prompt_bytes: 1024,
             max_messages: 8,
             request_timeout_secs: 600,
+            otlp_endpoint: None,
         };
         assert!(cfg.validate().is_err());
     }

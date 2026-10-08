@@ -26,6 +26,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy Lint
         run: cargo clippy -- -D warnings
+      - name: Clippy Lint (otlp feature)
+        run: cargo clippy --features otlp -- -D warnings
 
   test:
     name: Tests (${{ matrix.toolchain }})
