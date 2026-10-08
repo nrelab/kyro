@@ -16,6 +16,8 @@ pub struct Request {
     pub prefill_cursor: usize,
     pub temperature: f32,
     pub top_p: f32,
+    /// Scheduling priority: higher values are dequeued first.
+    pub priority: u32,
     /// Channel to send newly generated tokens back to the API for streaming.
     pub token_sender: Option<tokio::sync::mpsc::UnboundedSender<u32>>,
     /// Optional grammar processor for structured output (XGrammar).
@@ -62,7 +64,14 @@ impl Scheduler {
     }
 
     pub fn add_request(&mut self, request: Request) {
-        self.waiting_queue.push_back(request);
+        // Insert by priority (descending); FIFO within equal priority.
+        let priority = request.priority;
+        let pos = self
+            .waiting_queue
+            .iter()
+            .position(|r| r.priority < priority)
+            .unwrap_or(self.waiting_queue.len());
+        self.waiting_queue.insert(pos, request);
     }
 
     pub fn schedule(&mut self) -> (Vec<u64>, Vec<u64>) {
@@ -170,6 +179,11 @@ impl Scheduler {
         }
         cancelled
     }
+
+    /// GPU KV-cache utilization in percent (0..=100).
+    pub fn kv_cache_usage_percent(&self) -> f64 {
+        self.block_manager.kv_cache_usage_percent()
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +201,7 @@ mod tests {
             prefill_cursor: 0,
             temperature: 1.0,
             top_p: 1.0,
+            priority: 0,
             token_sender: None,
             grammar_processor: None,
         }
@@ -266,6 +281,36 @@ mod tests {
         let mut sched = Scheduler::new(bm, SchedulerConfig::default());
         assert!(!sched.cancel_request(999));
     }
+
+    #[test]
+    fn higher_priority_dequeued_first() {
+        let bm = BlockManager::new(16, 64, 16);
+        let mut sched = Scheduler::new(bm, SchedulerConfig::default());
+        sched.add_request(make_request(1, vec![1, 2, 3], 4));
+        let mut high = make_request(2, vec![1, 2, 3], 4);
+        high.priority = 10;
+        sched.add_request(high);
+        let mut med = make_request(3, vec![1, 2, 3], 4);
+        med.priority = 5;
+        sched.add_request(med);
+
+        let (prefill, _) = sched.schedule();
+        assert_eq!(
+            prefill,
+            vec![2, 3, 1],
+            "highest priority should be scheduled first"
+        );
+    }
+
+    #[test]
+    fn equal_priority_is_fifo() {
+        let bm = BlockManager::new(16, 64, 16);
+        let mut sched = Scheduler::new(bm, SchedulerConfig::default());
+        sched.add_request(make_request(1, vec![1, 2, 3], 4));
+        sched.add_request(make_request(2, vec![1, 2, 3], 4));
+        let (prefill, _) = sched.schedule();
+        assert_eq!(prefill, vec![1, 2], "equal priority preserves FIFO order");
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +349,7 @@ mod property_tests {
                 prefill_cursor: 0,
                 temperature: 1.0,
                 top_p: 1.0,
+                priority: 0,
                 token_sender: None,
                 grammar_processor: None,
             });

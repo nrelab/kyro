@@ -45,6 +45,24 @@ async fn main() -> Result<()> {
     let config = kyro::config::AppConfig::from_env_and_args()?;
     info!("Configuration: {:?}", config);
 
+    // 3b. Optional OTLP tracing (compiled in with the `otlp` feature)
+    #[cfg(feature = "otlp")]
+    let tracing_provider = match &config.otlp_endpoint {
+        Some(endpoint) => {
+            let provider = kyro::telemetry::init(endpoint, &config.model_name)?;
+            info!("OTLP tracing enabled (endpoint: {})", endpoint);
+            Some(provider)
+        }
+        None => {
+            info!("No OTLP endpoint configured; distributed tracing disabled.");
+            None
+        }
+    };
+    #[cfg(not(feature = "otlp"))]
+    if config.otlp_endpoint.is_some() {
+        info!("OTLP endpoint configured but the otlp feature is not enabled; ignoring.");
+    }
+
     let tokenizer_path = config.tokenizer_path.clone();
     let tokenizer = match &tokenizer_path {
         Some(path) => {
@@ -113,6 +131,11 @@ async fn main() -> Result<()> {
             info!("Shutdown signal received; draining in-flight requests");
         })
         .await?;
+
+    #[cfg(feature = "otlp")]
+    if let Some(provider) = tracing_provider {
+        provider.shutdown()?;
+    }
 
     Ok(())
 }

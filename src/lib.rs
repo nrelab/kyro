@@ -7,4 +7,5 @@ pub mod metrics;
 pub mod model;
 pub mod scheduler;
 pub mod speculative;
+pub mod telemetry;
 pub mod worker;

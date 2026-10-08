@@ -27,16 +27,16 @@ Kyro is a well-architected, early-stage LLM serving engine with a solid core run
 
 | Area | Status | Notes |
 |------|--------|-------|
-| **Testing** | ✅ Done | 73 tests, 70.40% coverage, CI gate at ≥70%; scheduler modules >94%. |
+| **Testing** | ✅ Done | 92 tests, 72.00% coverage, CI gate at ≥70%; scheduler modules >94%. |
 | **Distributed Inference** | ❌ Open | `src/distributed.rs` is a stub; no NCCL or weight sharding. |
 | **Quantization** | 🔶 Partial | GGUF functional; AWQ/FP8 are no-op casts. Audit documented in code. |
 | **LoRA** | 🔶 Partial | Module exists; not integrated into forward pass or API. |
 | **Speculative Decoding** | 🔶 Partial | Module exists; not active in worker loop. |
 | **Model Ecosystem** | ❌ Open | Llama only; Mistral, Qwen, etc. not supported. |
-| **Observability** | 🔶 Partial | Core metrics and dashboard exist; no OTLP/structured logging. |
-| **Error Handling** | 🔶 Partial | Basic error handling; no circuit breaker or graceful shutdown. |
-| **Deployment Docs** | 🔶 Partial | Troubleshooting exists; no comprehensive ops guide. |
-| **API Compatibility** | 🔶 Partial | Request cancellation and timeouts added; no tools/functions. |
+| **Observability** | ✅ Done | Core metrics, Grafana dashboard, SLO/alert rules, KV-cache gauge, optional OTLP tracing (`otlp` feature), structured request spans. |
+| **Error Handling** | ✅ Done | Circuit breaker (trips after 10 errors, drains requests, flips `/ready` to 503), transient-error retry with backoff, graceful SIGINT shutdown, readiness probe. |
+| **Deployment Docs** | ✅ Done | Troubleshooting guide, production checklist, env var table, SLO/alerting docs. |
+| **API Compatibility** | ✅ Done | Request cancellation (`POST /v1/cancel` + `X-Request-Id`), priority queuing (0–100), request timeouts (streaming + non-streaming), `tools`/`functions` parameter support. |
 
 ---
 

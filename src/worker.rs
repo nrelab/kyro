@@ -275,6 +275,10 @@ impl Worker {
             for id in finished {
                 scheduler.finish_request(id);
             }
+
+            self.metrics
+                .kv_cache_usage
+                .set(scheduler.kv_cache_usage_percent());
         }
 
         tokio::task::yield_now().await;

@@ -11,7 +11,7 @@ Recommended Service Level Objectives and Prometheus alerting rules for productio
 | TBT p99 | < 100ms | `kyro_tbt_ms` histogram |
 | Request success rate | > 99% | Non-5xx responses / total requests |
 | Queue depth | < 50 | `kyro_queue_depth` sustained |
-| KV cache usage | < 90% | `kyro_kv_cache_usage_percent` |
+| KV cache usage | < 90% | `kyro_kv_cache_usage_percent` (updated per worker iteration and on `/metrics` scrape) |
 
 ## Prometheus Alerting Rules
 
